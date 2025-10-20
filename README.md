@@ -1,6 +1,12 @@
 # Agentic AI Starter Template
 
+**PROPRIETARY SOFTWARE - ALL RIGHTS RESERVED**
+
 Production-ready starter template for building autonomous AI agents with reasoning chains, human-in-the-loop oversight, and AWS cloud deployment.
+
+## License Notice
+
+This software is proprietary and confidential. No evaluation, testing, or use of any kind is permitted without an express written license from Sean McDonnell. See LICENSE file for complete terms.
 
 ## Features
 
@@ -38,17 +44,29 @@ Production-ready starter template for building autonomous AI agents with reasoni
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Licensing
+
+**IMPORTANT**: This is proprietary software. To obtain a license for evaluation, development, or production use, contact Sean McDonnell.
+
+### Prohibited Without License:
+- Evaluation or testing
+- Development or production use
+- Copying or modification
+- Distribution or sublicensing
+- Reverse engineering
+
+## Quick Start (Licensed Users Only)
 
 ### Prerequisites
 
 - Python 3.10+
 - Docker and Docker Compose
 - Poetry (for dependency management)
+- Valid license agreement
 
 ### Installation
 
-1. **Clone the repository**
+1. **Clone the repository** (requires access)
 ```bash
 git clone https://github.com/seanebones-lang/Agentic-AI.git
 cd Agentic-AI
@@ -170,44 +188,7 @@ poetry run mypy .
 
 ## AWS Deployment
 
-### Prerequisites
-
-- AWS CLI configured
-- ECR repository created
-- VPC and subnets configured
-
-### Deployment Steps
-
-1. **Build and push Docker image**
-```bash
-# Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-
-# Build image
-docker build -t agentic-ai -f deployment/Dockerfile .
-
-# Tag and push
-docker tag agentic-ai:latest ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/agentic-ai:latest
-docker push ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/agentic-ai:latest
-```
-
-2. **Deploy CloudFormation stack**
-```bash
-aws cloudformation create-stack \
-  --stack-name agentic-ai-production \
-  --template-body file://deployment/aws/cloudformation.yaml \
-  --parameters \
-    ParameterKey=Environment,ParameterValue=production \
-    ParameterKey=VpcId,ParameterValue=vpc-xxxxx \
-    ParameterKey=SubnetIds,ParameterValue=subnet-xxxxx\\,subnet-yyyyy \
-    ParameterKey=ContainerImage,ParameterValue=ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/agentic-ai:latest \
-  --capabilities CAPABILITY_IAM
-```
-
-3. **Monitor deployment**
-```bash
-aws cloudformation describe-stacks --stack-name agentic-ai-production
-```
+See `docs/DEPLOYMENT.md` for complete deployment instructions.
 
 ## Creating Custom Agents
 
@@ -295,23 +276,17 @@ Custom CloudWatch metrics:
 
 LangSmith integration for LLM call tracing and execution flow visualization.
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details
-
 ## Support
 
-For issues and questions:
-- GitHub Issues: https://github.com/seanebones-lang/Agentic-AI/issues
-- Documentation: See `docs/` directory
+For licensing inquiries and support:
+- Contact: Sean McDonnell
+- Repository: https://github.com/seanebones-lang/Agentic-AI (private)
+
+## Copyright
+
+Copyright (c) 2025 Sean McDonnell. All Rights Reserved.
+
+This software is proprietary and confidential. Unauthorized use is strictly prohibited.
 
 ## Acknowledgments
 
@@ -320,4 +295,3 @@ Built with:
 - [LangChain](https://github.com/langchain-ai/langchain) for LLM integrations
 - [FastAPI](https://fastapi.tiangolo.com/) for the API framework
 - [ChromaDB](https://www.trychroma.com/) for vector storage
-
