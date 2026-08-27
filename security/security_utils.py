@@ -11,8 +11,8 @@ from observability.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context - use sha256_crypt instead of bcrypt due to bcrypt 5.0.0/passlib compatibility
+pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 
 def sanitize_input(input_str: str, allow_special_chars: bool = False) -> str:
@@ -189,10 +189,6 @@ def hash_api_key(api_key: str) -> str:
     Returns:
         Hashed API key
     """
-    # bcrypt has a 72-byte maximum password length
-    # Truncate if necessary before hashing
-    if len(api_key.encode('utf-8')) > 72:
-        api_key = api_key[:72]
     return pwd_context.hash(api_key)
 
 
