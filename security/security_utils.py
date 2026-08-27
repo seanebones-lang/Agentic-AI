@@ -189,6 +189,10 @@ def hash_api_key(api_key: str) -> str:
     Returns:
         Hashed API key
     """
+    # bcrypt has a 72-byte maximum password length
+    # Truncate if necessary before hashing
+    if len(api_key.encode('utf-8')) > 72:
+        api_key = api_key[:72]
     return pwd_context.hash(api_key)
 
 

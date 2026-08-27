@@ -214,27 +214,27 @@ class SimpleAgent(BaseAgent):
         graph = StateGraph(AgentState)
 
         # Add nodes
-        graph.add_node("plan", self.plan_node)
-        graph.add_node("execute", self.execute_node)
-        graph.add_node("reflect", self.reflect_node)
-        graph.add_node("hitl_check", self.hitl_check_node)
+        graph.add_node("agent_plan", self.plan_node)
+        graph.add_node("agent_execute", self.execute_node)
+        graph.add_node("agent_reflect", self.reflect_node)
+        graph.add_node("agent_hitl_check", self.hitl_check_node)
 
         # Add edges
-        graph.add_edge("plan", "hitl_check")
+        graph.add_edge("agent_plan", "agent_hitl_check")
         graph.add_conditional_edges(
-            "hitl_check",
+            "agent_hitl_check",
             self.should_wait_for_approval,
-            {"approved": "execute", "waiting": END},
+            {"approved": "agent_execute", "waiting": END},
         )
-        graph.add_edge("execute", "reflect")
+        graph.add_edge("agent_execute", "agent_reflect")
         graph.add_conditional_edges(
-            "reflect",
+            "agent_reflect",
             self.decide_next_step,
-            {"replan": "plan", "end": END},
+            {"replan": "agent_plan", "end": END},
         )
 
         # Set entry point
-        graph.set_entry_point("plan")
+        graph.set_entry_point("agent_plan")
 
         return graph
 
@@ -260,7 +260,7 @@ class SimpleAgent(BaseAgent):
         ]
 
         return {
-            "plan": plan,
+            "agent_plan": plan,
             "current_step": state.current_step + 1,
         }
 
