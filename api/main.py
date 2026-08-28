@@ -44,10 +44,35 @@ settings = get_settings()
 # Create FastAPI app
 app = FastAPI(
     title="Agentic AI Starter Template",
-    description="Production-ready API for autonomous AI agents with HITL oversight",
+    description="""
+Production-ready API for autonomous AI agents with Human-in-the-Loop (HITL) oversight.
+
+## Features
+
+- **Autonomous Agents**: LangGraph-based state management with multiple reasoning patterns
+- **Tool Integration**: Extensible tool system with semantic search and error handling
+- **Human-in-the-Loop (HITL)**: Built-in approval gates and escalation logic
+- **Memory Management**: Hybrid short-term (Redis) and long-term (ChromaDB) memory
+- **Observability**: Structured logging, metrics collection, Prometheus metrics, LangSmith tracing
+- **Security**: OWASP-compliant input validation, PII detection, secure API key management
+
+## Authentication
+
+All endpoints (except `/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`) require API key authentication via the `X-API-Key` header.
+
+## Rate Limiting
+
+API requests are rate-limited per key. Default: 100 requests/minute.
+""",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "health", "description": "Health check and monitoring endpoints"},
+        {"name": "agents", "description": "Agent execution and management"},
+        {"name": "hitl", "description": "Human-in-the-Loop approval workflows"},
+        {"name": "metrics", "description": "Prometheus metrics and monitoring"},
+    ],
 )
 
 
@@ -208,7 +233,7 @@ def get_checkpoint_manager_v2() -> CheckpointManager:
     return _checkpoint_manager
 
 
-@app.get("/", response_model=HealthCheckResponse)
+@app.get("/", response_model=HealthCheckResponse, tags=["health"])
 async def root() -> HealthCheckResponse:
     """Root endpoint with health check."""
     return HealthCheckResponse(
@@ -222,7 +247,7 @@ async def root() -> HealthCheckResponse:
     )
 
 
-@app.get("/health", response_model=HealthCheckResponse)
+@app.get("/health", response_model=HealthCheckResponse, tags=["health"])
 async def health_check() -> HealthCheckResponse:
     """Health check endpoint with detailed service status."""
     import redis
@@ -268,7 +293,7 @@ async def health_check() -> HealthCheckResponse:
 
 
 
-@app.get("/metrics")
+@app.get("/metrics", tags=["metrics"])
 async def metrics() -> Response:
     """Prometheus metrics endpoint."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -324,14 +349,14 @@ async def readiness_check() -> dict:
     }
 
 
-@app.get("/metrics")
+@app.get("/metrics", tags=["metrics"])
 async def metrics_endpoint():
     """Prometheus metrics endpoint."""
     metrics = get_metrics_collector()
     return metrics.export_prometheus()
 
 
-@app.post("/agents/execute", response_model=AgentExecuteResponse)
+@app.post("/agents/execute", response_model=AgentExecuteResponse, tags=["agents"])
 async def execute_agent(
     request: AgentExecuteRequest,
     api_key: str = Depends(get_api_key),
@@ -419,7 +444,7 @@ async def execute_agent(
         )
 
 
-@app.get("/agents/{execution_id}/status", response_model=AgentStatusResponse)
+@app.get("/agents/{execution_id}/status", response_model=AgentStatusResponse, tags=["agents"])
 async def get_agent_status(
     execution_id: str,
     api_key: str = Depends(get_api_key),
@@ -447,7 +472,7 @@ async def get_agent_status(
     )
 
 
-@app.post("/agents/{execution_id}/approve", response_model=ApprovalResponse)
+@app.post("/agents/{execution_id}/approve", response_model=ApprovalResponse, tags=["hitl"])
 async def approve_checkpoint(
     execution_id: str,
     request: ApprovalRequest,
@@ -483,7 +508,7 @@ async def approve_checkpoint(
         )
 
 
-@app.get("/hitl/checkpoints", response_model=CheckpointListResponse)
+@app.get("/hitl/checkpoints", response_model=CheckpointListResponse, tags=["hitl"])
 async def list_checkpoints(
     api_key: str = Depends(get_api_key),
 ) -> CheckpointListResponse:
@@ -553,7 +578,7 @@ async def escalate_checkpoint(
     return {"message": "Checkpoint escalated", "checkpoint": checkpoint.dict()}
 
 
-@app.get("/agents/{execution_id}/history", response_model=AgentHistoryResponse)
+@app.get("/agents/{execution_id}/history", response_model=AgentHistoryResponse, tags=["agents"])
 async def get_agent_history(
     execution_id: str,
     api_key: str = Depends(get_api_key),
