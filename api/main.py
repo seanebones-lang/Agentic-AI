@@ -606,6 +606,45 @@ async def get_agent_history(
     )
 
 
+
+@app.post("/admin/api-keys", tags=["admin"])
+async def create_api_key(
+    roles: List[str] = ["operator"],
+    current_user: TokenPayload = Depends(require_permission(Permission.ADMIN_USERS)),
+) -> Dict[str, Any]:
+    """Create a new API key (admin only)."""
+    import secrets
+    import hashlib
+    
+    # Generate API key
+    raw_key = f"sk_{secrets.token_urlsafe(32)}"
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    
+    # In production, store in database with roles, expiration, etc.
+    # For now, return the raw key (only shown once)
+    
+    logger.info("API key created", created_by=current_user.sub, roles=roles)
+    
+    return {
+        "api_key": raw_key,
+        "key_hash": key_hash,
+        "roles": roles,
+        "created_at": datetime.utcnow().isoformat(),
+        "note": "Save this key now - it will not be shown again",
+    }
+
+
+@app.get("/admin/api-keys", tags=["admin"])
+async def list_api_keys(
+    current_user: TokenPayload = Depends(require_permission(Permission.ADMIN_USERS)),
+) -> Dict[str, Any]:
+    """List all API keys (admin only)."""
+    # In production, query database
+    return {
+        "api_keys": [],
+        "message": "API key listing not yet implemented - connect to database",
+    }
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: any, exc: HTTPException) -> JSONResponse:
     """Handle HTTP exceptions."""
