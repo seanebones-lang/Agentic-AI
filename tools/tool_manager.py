@@ -247,10 +247,13 @@ class ToolManager(LoggerMixin):
                     f"{tool.schema.category} {' '.join(tool.schema.tags)}"
                 )
 
+                # Use a unique ID that includes a hash to prevent collisions
+                tool_id = f"{tool.schema.name}_{hash(searchable_text)}"
+
                 self.vector_store.add(
                     documents=[searchable_text],
-                    ids=[tool.schema.name],
-                    metadatas=[{"category": tool.schema.category, "tags": tool.schema.tags}],
+                    ids=[tool_id],
+                    metadatas=[{"category": tool.schema.category, "tags": tool.schema.tags, "name": tool.schema.name}],
                 )
             except Exception as e:
                 self.logger.error("Failed to add tool to vector store", error=str(e))

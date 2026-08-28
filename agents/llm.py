@@ -3,7 +3,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
-from pydantic import BaseModel
+from observability.logger import LoggerMixin, get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -35,7 +37,7 @@ class LLMUsage:
     estimated_cost_usd: float = 0.0
 
 
-class LLMProvider(ABC):
+class LLMProvider(ABC, LoggerMixin):
     """Abstract base class for LLM providers."""
 
     def __init__(
@@ -205,7 +207,8 @@ class OpenAIProvider(LLMProvider):
             import tiktoken
             encoding = tiktoken.encoding_for_model(self.model)
             return len(encoding.encode(text))
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Token counting failed, using approximation", error=str(e))
             return len(text) // 4  # Rough approximation
 
     def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
@@ -359,7 +362,8 @@ class AnthropicProvider(LLMProvider):
                 messages=[{"role": "user", "content": text}],
             )
             return response.input_tokens
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Token counting failed, using approximation", error=str(e))
             return len(text) // 4
 
     def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
@@ -487,7 +491,8 @@ class AzureOpenAIProvider(LLMProvider):
             import tiktoken
             encoding = tiktoken.encoding_for_model(self.model)
             return len(encoding.encode(text))
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Token counting failed, using approximation", error=str(e))
             return len(text) // 4
 
     def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:

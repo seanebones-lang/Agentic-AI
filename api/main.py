@@ -2,7 +2,7 @@
 
 import time
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Depends, status
@@ -23,13 +23,13 @@ from api.models import (
     ErrorResponse,
 )
 from config import get_settings
-from hitl.checkpoint_manager import get_checkpoint_manager
+from hitl.checkpoint_manager_v2 import CheckpointManager, WebhookConfig, EscalationPolicy
 from memory.memory_manager import MemoryManager
 from observability.logger import get_logger, setup_logging, set_correlation_id
 from observability.metrics import get_metrics_collector
 from observability.tracing import setup_tracing
 from tools.tool_manager import ToolManager
-from tools.examples import APICallerTool, DatabaseQueryTool, FileOperationsTool, NotifierTool
+from tools.examples import APICallerTool, DatabaseQueryTool, FileOperationsTool, NotifierTool, CodeExecutionTool, WebSearchTool, VectorSearchTool, BrowserTool, ShellTool
 
 # Initialize logging and tracing
 setup_logging()
@@ -62,14 +62,98 @@ app.add_middleware(LoggingMiddleware)
 if settings.rate_limit_enabled:
     app.add_middleware(RateLimitMiddleware)
 
-# Global state for execution tracking
+# Global state
 executions: Dict[str, Dict] = {}
+_checkpoint_manager: Optional[CheckpointManager] = None
+
+# Tool manager (reused across requests)
+tool_manager = ToolManager()
+tool_manager.register_tool(APICallerTool())
+tool_manager.register_tool(DatabaseQueryTool())
+tool_manager.register_tool(FileOperationsTool())
+tool_manager.register_tool(NotifierTool())
+tool_manager.register_tool(CodeExecutionTool())
+tool_manager.register_tool(WebSearchTool())
+tool_manager.register_tool(VectorSearchTool())
+tool_manager.register_tool(BrowserTool())
+tool_manager.register_tool(ShellTool())
+
+# Memory manager (reused)
+memory_manager = MemoryManager()
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
     """Initialize services on startup."""
+    global _checkpoint_manager
     logger.info("Starting Agentic AI API", environment=settings.environment)
+
+    # Initialize v2 checkpoint manager with DB and Redis
+    try:
+        import redis.asyncio as redis
+        from asyncpg import create_pool
+
+        redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+        db_pool = await create_pool(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            user=settings.postgres_user,
+            password=settings.postgres_password,
+            database=settings.postgres_db,
+        )
+
+        webhook_configs = [
+            WebhookConfig(
+                url=settings.hitl_slack_webhook_url or "",
+                secret=settings.hitl_webhook_secret or "default",
+                events=["checkpoint.created", "checkpoint.resolved", "checkpoint.escalated"],
+            )
+        ] if settings.hitl_slack_webhook_url else []
+
+        escalation_policies = [
+            EscalationPolicy(
+                name="uncertainty_escalation",
+                trigger_conditions={"reason": "uncertainty"},
+                escalation_delay_seconds=300,
+                escalation_targets=["senior_reviewers"],
+                max_escalations=2,
+            ),
+            EscalationPolicy(
+                name="high_cost_escalation",
+                trigger_conditions={"reason": "high_cost"},
+                escalation_delay_seconds=60,
+                escalation_targets=["finance_approvers", "team_leads"],
+                max_escalations=3,
+            ),
+            EscalationPolicy(
+                name="security_escalation",
+                trigger_conditions={"reason": "sensitive_data"},
+                escalation_delay_seconds=30,
+                escalation_targets=["security_team", "compliance"],
+                max_escalations=1,
+                auto_reject_on_timeout=True,
+            ),
+            EscalationPolicy(
+                name="error_escalation",
+                trigger_conditions={"reason": "error"},
+                escalation_delay_seconds=120,
+                escalation_targets=["on_call_engineer"],
+                max_escalations=2,
+            ),
+        ]
+
+        _checkpoint_manager = CheckpointManager(
+            db_pool=db_pool,
+            redis_client=redis_client,
+            webhook_configs=webhook_configs,
+            escalation_policies=escalation_policies,
+        )
+        await _checkpoint_manager.initialize()
+        logger.info("HITL v2 checkpoint manager initialized")
+
+    except Exception as e:
+        logger.warning("Failed to initialize HITL v2 (will use in-memory fallback)", error=str(e))
+        _checkpoint_manager = None
 
 
 @app.on_event("shutdown")
@@ -78,6 +162,16 @@ async def shutdown_event() -> None:
     logger.info("Shutting down Agentic AI API")
     metrics = get_metrics_collector()
     metrics.publish_metrics()
+
+
+def get_checkpoint_manager_v2() -> CheckpointManager:
+    """Get or create v2 checkpoint manager instance."""
+    global _checkpoint_manager
+    if _checkpoint_manager is None:
+        # Fallback to in-memory if v2 not initialized
+        from hitl.checkpoint_manager import CheckpointManager as LegacyCheckpointManager
+        return LegacyCheckpointManager()
+    return _checkpoint_manager
 
 
 @app.get("/", response_model=HealthCheckResponse)
@@ -134,17 +228,7 @@ async def execute_agent(
     start_time = time.time()
 
     try:
-        # Initialize tool manager and register tools
-        tool_manager = ToolManager()
-        tool_manager.register_tool(APICallerTool())
-        tool_manager.register_tool(DatabaseQueryTool())
-        tool_manager.register_tool(FileOperationsTool())
-        tool_manager.register_tool(NotifierTool())
-
-        # Initialize memory manager
-        memory_manager = MemoryManager()
-
-        # Create agent
+        # Create agent with shared tool manager and memory manager
         agent = SimpleAgent(
             tools=list(tool_manager.tools.values()),
             memory_manager=memory_manager,
@@ -158,8 +242,8 @@ async def execute_agent(
             **request.initial_state,
         }
 
-        # Execute agent
-        final_state = agent.run(initial_state)
+        # Execute agent (async)
+        final_state = await agent.arun(initial_state)
 
         duration = time.time() - start_time
 
@@ -244,7 +328,7 @@ async def approve_checkpoint(
     api_key: str = Depends(get_api_key),
 ) -> ApprovalResponse:
     """Approve or reject a HITL checkpoint."""
-    checkpoint_manager = get_checkpoint_manager()
+    checkpoint_manager = get_checkpoint_manager_v2()
 
     try:
         checkpoint = checkpoint_manager.resolve_checkpoint(
@@ -278,14 +362,69 @@ async def list_checkpoints(
     api_key: str = Depends(get_api_key),
 ) -> CheckpointListResponse:
     """List all pending HITL checkpoints."""
-    checkpoint_manager = get_checkpoint_manager()
-    checkpoints = checkpoint_manager.list_pending_checkpoints()
+    checkpoint_manager = get_checkpoint_manager_v2()
+    checkpoints = await checkpoint_manager.list_pending_checkpoints()
 
     return CheckpointListResponse(
         checkpoints=[checkpoint.dict() for checkpoint in checkpoints],
         total_count=len(checkpoints),
         pending_count=len(checkpoints),
     )
+
+
+@app.get("/hitl/checkpoints/stats")
+async def get_checkpoint_stats(
+    api_key: str = Depends(get_api_key),
+) -> dict:
+    """Get checkpoint statistics for dashboard."""
+    checkpoint_manager = get_checkpoint_manager_v2()
+    checkpoints = await checkpoint_manager.list_pending_checkpoints()
+
+    stats = {
+        "pending": sum(1 for c in checkpoints if c.status == "pending"),
+        "approved": sum(1 for c in checkpoints if c.status == "approved"),
+        "rejected": sum(1 for c in checkpoints if c.status == "rejected"),
+        "escalated": sum(1 for c in checkpoints if c.status == "escalated"),
+        "total": len(checkpoints),
+    }
+    return stats
+
+
+@app.get("/hitl/checkpoints/{checkpoint_id}")
+async def get_checkpoint_detail(
+    checkpoint_id: str,
+    api_key: str = Depends(get_api_key),
+) -> dict:
+    """Get checkpoint detail for dashboard view."""
+    checkpoint_manager = get_checkpoint_manager_v2()
+    checkpoint = await checkpoint_manager.get_checkpoint(checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    return checkpoint.dict()
+
+
+@app.post("/hitl/checkpoints/{checkpoint_id}/escalate")
+async def escalate_checkpoint(
+    checkpoint_id: str,
+    api_key: str = Depends(get_api_key),
+) -> dict:
+    """Escalate a checkpoint."""
+    checkpoint_manager = get_checkpoint_manager_v2()
+    checkpoint = await checkpoint_manager.get_checkpoint(checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+
+    # Escalate by advancing approval chain
+    checkpoint.escalation_count += 1
+    checkpoint.status = "escalated"
+    checkpoint.add_audit_entry("escalated", details={"manual": True})
+
+    if checkpoint_manager.db_pool:
+        await checkpoint_manager._persist_checkpoint(checkpoint)
+    if checkpoint_manager.redis:
+        await checkpoint_manager._cache_checkpoint(checkpoint)
+
+    return {"message": "Checkpoint escalated", "checkpoint": checkpoint.dict()}
 
 
 @app.get("/agents/{execution_id}/history", response_model=AgentHistoryResponse)

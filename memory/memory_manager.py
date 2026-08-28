@@ -56,12 +56,16 @@ class MemoryManager(LoggerMixin):
         # Initialize long-term memory (Vector DB)
         self.vector_store = vector_store or VectorStore()
 
-        # Initialize tokenizer for context management
+        # Initialize tokenizer for context management (cached)
         try:
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
         except Exception:
             self.logger.warning("Tiktoken not available, using approximate token counting")
             self.tokenizer = None
+
+        # Cache timestamp function
+        from datetime import datetime
+        self._now = datetime.utcnow
 
     def _get_session_key(self, session_id: str, key: str) -> str:
         """Generate Redis key for session data."""
@@ -208,7 +212,7 @@ class MemoryManager(LoggerMixin):
             "role": role,
             "content": content,
             "metadata": metadata or {},
-            "timestamp": str(tiktoken.get_encoding("cl100k_base")),  # Placeholder
+            "timestamp": self._now().isoformat(),
         }
 
         history.append(message)

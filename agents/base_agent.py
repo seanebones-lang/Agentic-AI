@@ -118,9 +118,29 @@ class BaseAgent(ABC, LoggerMixin):
         """
         pass
 
+    @property
+    def compiled_graph(self):
+        """Cached compiled graph - compiles once on first access."""
+        if not hasattr(self, '_compiled_graph') or self._compiled_graph is None:
+            self._compiled_graph = self.graph.compile()
+        return self._compiled_graph
+
     def run(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute the agent with the given initial state.
+        Execute the agent with the given initial state (sync wrapper).
+
+        Args:
+            initial_state: Initial state dictionary
+
+        Returns:
+            Dict containing the final state after execution
+        """
+        import asyncio
+        return asyncio.run(self.arun(initial_state))
+
+    async def arun(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Async execution of the agent (primary path).
 
         Args:
             initial_state: Initial state dictionary
@@ -136,9 +156,9 @@ class BaseAgent(ABC, LoggerMixin):
         self.logger.info("Starting agent execution", goal=state.goal)
 
         try:
-            # Compile and invoke the graph
-            compiled_graph = self.graph.compile()
-            final_state = compiled_graph.invoke(state.dict())
+            # Use cached compiled graph
+            compiled_graph = self.compiled_graph
+            final_state = await compiled_graph.ainvoke(state.dict())
 
             duration = time.time() - start_time
             success = final_state.get("error") is None
@@ -175,54 +195,6 @@ class BaseAgent(ABC, LoggerMixin):
             self.metrics.record_error(
                 error_type=type(e).__name__,
                 component=self.__class__.__name__,
-            )
-            raise
-
-    async def arun(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Async execution of the agent (for async workflows).
-
-        Args:
-            initial_state: Initial state dictionary
-
-        Returns:
-            Dict containing the final state after execution
-        """
-        import time
-
-        start_time = time.time()
-        state = AgentState(**initial_state)
-
-        self.logger.info("Starting async agent execution", goal=state.goal)
-
-        try:
-            compiled_graph = self.graph.compile()
-            final_state = await compiled_graph.ainvoke(state.dict())
-
-            duration = time.time() - start_time
-            success = final_state.get("error") is None
-
-            self.metrics.record_agent_execution(
-                agent_type=self.__class__.__name__,
-                success=success,
-                duration_seconds=duration,
-            )
-
-            self.logger.info(
-                "Async agent execution completed",
-                success=success,
-                duration_seconds=duration,
-            )
-
-            return final_state
-
-        except Exception as e:
-            duration = time.time() - start_time
-            self.logger.error("Async agent execution failed", error=str(e))
-            self.metrics.record_agent_execution(
-                agent_type=self.__class__.__name__,
-                success=False,
-                duration_seconds=duration,
             )
             raise
 
@@ -327,7 +299,7 @@ Always respond with structured output matching the required schema."""
 
         return graph
 
-    def plan_node(self, state: AgentState) -> Dict[str, Any]:
+    async def plan_node(self, state: AgentState) -> Dict[str, Any]:
         """Planning node - uses LLM to create a structured plan."""
         if not self.llm:
             self.logger.warning("No LLM provider, using fallback plan")
@@ -353,8 +325,7 @@ Respond with JSON:
         ]
 
         try:
-            import asyncio
-            response = asyncio.run(self.llm.chat(messages, tools=self._tool_schemas))
+            response = await self.llm.chat(messages, tools=self._tool_schemas)
 
             import json
             try:
@@ -391,7 +362,7 @@ Respond with JSON:
             "current_step": state.current_step + 1,
         }
 
-    def execute_node(self, state: AgentState) -> Dict[str, Any]:
+    async def execute_node(self, state: AgentState) -> Dict[str, Any]:
         """Execution node - executes planned actions using ToolManager."""
         self.logger.info("Executing step", plan_length=len(state.plan))
 
@@ -406,7 +377,7 @@ Respond with JSON:
             self.logger.info("Executing plan step", step=i, step_text=step)
 
             try:
-                result = tool_manager.execute_tool(
+                result = await tool_manager.aexecute_tool(
                     tool_name="auto",
                     args={"task": step},
                 )
@@ -420,7 +391,7 @@ Respond with JSON:
             "current_step": state.current_step + 1,
         }
 
-    def reflect_node(self, state: AgentState) -> Dict[str, Any]:
+    async def reflect_node(self, state: AgentState) -> Dict[str, Any]:
         """Reflection node - uses LLM to evaluate execution."""
         if not self.llm:
             self.logger.warning("No LLM provider, using fallback reflection")
@@ -455,8 +426,7 @@ Respond with JSON:
         ]
 
         try:
-            import asyncio
-            response = asyncio.run(self.llm.chat(messages))
+            response = await self.llm.chat(messages)
 
             import json
             try:
@@ -491,7 +461,7 @@ Respond with JSON:
             "result": {"status": "completed", "actions": state.actions},
         }
 
-    def hitl_check_node(self, state: AgentState) -> Dict[str, Any]:
+    async def hitl_check_node(self, state: AgentState) -> Dict[str, Any]:
         """
         HITL checkpoint node - checks if human approval is needed.
 

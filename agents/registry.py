@@ -77,16 +77,19 @@ class AgentRegistry(LoggerMixin):
     - Dynamic agent loading from config
     """
 
-    def __init__(self, health_check_interval: int = 60):
+    def __init__(self, health_check_interval: int = 60, stale_ttl_seconds: int = 300):
         """
         Initialize agent registry.
 
         Args:
             health_check_interval: Seconds between health checks
+            stale_ttl_seconds: TTL in seconds after which agents are considered stale
         """
         self._agents: Dict[str, AgentInstance] = {}
         self._health_check_interval = health_check_interval
+        self._stale_ttl_seconds = stale_ttl_seconds
         self._health_check_task: Optional[Any] = None
+        self._cleanup_task: Optional[Any] = None
 
     def register(
         self,
@@ -323,7 +326,7 @@ class AgentRegistry(LoggerMixin):
         return results
 
     def start_health_checks(self) -> None:
-        """Start periodic health checks."""
+        """Start periodic health checks and stale agent cleanup."""
         import asyncio
 
         async def _health_check_loop():
@@ -331,16 +334,50 @@ class AgentRegistry(LoggerMixin):
                 await asyncio.sleep(self._health_check_interval)
                 await self.health_check_all()
 
+        async def _cleanup_loop():
+            while True:
+                await asyncio.sleep(self._stale_ttl_seconds)
+                await self._cleanup_stale_agents()
+
         if self._health_check_task is None:
             self._health_check_task = asyncio.create_task(_health_check_loop())
             self.logger.info("Health check loop started", interval=self._health_check_interval)
 
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(_cleanup_loop())
+            self.logger.info("Stale agent cleanup loop started", ttl_seconds=self._stale_ttl_seconds)
+
     def stop_health_checks(self) -> None:
-        """Stop periodic health checks."""
+        """Stop periodic health checks and cleanup."""
         if self._health_check_task:
             self._health_check_task.cancel()
             self._health_check_task = None
             self.logger.info("Health check loop stopped")
+
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
+            self.logger.info("Stale agent cleanup loop stopped")
+
+    async def _cleanup_stale_agents(self) -> None:
+        """Remove agents that haven't been health-checked within TTL."""
+        now = datetime.utcnow()
+        stale_agents = []
+
+        for name, instance in self._agents.items():
+            if instance.last_health_check:
+                elapsed = (now - instance.last_health_check).total_seconds()
+                if elapsed > self._stale_ttl_seconds:
+                    stale_agents.append(name)
+
+        for name in stale_agents:
+            instance = self._agents.get(name)
+            if instance:
+                self.logger.warning("Removing stale agent", name=name, last_check=instance.last_health_check)
+            del self._agents[name]
+
+        if stale_agents:
+            self.logger.info("Cleaned up stale agents", count=len(stale_agents), names=stale_agents)
 
 
 # Global registry instance

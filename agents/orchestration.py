@@ -1,5 +1,6 @@
 """Multi-agent orchestration patterns."""
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
@@ -162,13 +163,12 @@ class SupervisorOrchestrator(BaseOrchestrator):
 
         return graph
 
-    def analyze_task_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def analyze_task_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Analyze task and identify required capabilities."""
         if not self.llm:
             return {"memory": {**state.memory, "required_capabilities": ["reasoning"]}}
 
         # Use LLM to analyze task
-        import asyncio
         analysis_prompt = f"""Task: {state.goal}
 
 Identify the capabilities needed to complete this task. Choose from:
@@ -183,7 +183,7 @@ Respond with JSON:
         ]
 
         try:
-            response = asyncio.run(self.llm.chat(messages))
+            response = await self.llm.chat(messages)
             import json
             analysis = json.loads(response.content)
             capabilities = [AgentCapability(c) for c in analysis.get("capabilities", ["reasoning"])]
@@ -215,18 +215,16 @@ Respond with JSON:
             "current_step": state.current_step + 1,
         }
 
-    def delegate_parallel_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def delegate_parallel_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Delegate to selected agents in parallel."""
-        import asyncio
+        tasks = []
+        for agent_name in state.pending_agents:
+            tasks.append(self.handoff_to_agent(state, agent_name, state.goal))
 
-        async def delegate_all():
-            for agent_name in state.pending_agents:
-                await self.handoff_to_agent(state, agent_name, state.goal)
-
-        asyncio.run(delegate_all())
+        await asyncio.gather(*tasks)
         return {"current_step": state.current_step + 1}
 
-    def aggregate_results_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def aggregate_results_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Aggregate results from all agents."""
         if not self.llm:
             # Simple concatenation fallback
@@ -240,7 +238,6 @@ Respond with JSON:
             }
 
         # Use LLM to synthesize results
-        import asyncio
         results_summary = "\n\n".join([
             f"Agent: {agent}\nResult: {result.get('result', {})}"
             for agent, result in state.sub_results.items()
@@ -259,7 +256,7 @@ Synthesize these results into a coherent final answer that addresses the origina
         ]
 
         try:
-            response = asyncio.run(self.llm.chat(messages))
+            response = await self.llm.chat(messages)
             synthesized = response.content
         except Exception:
             synthesized = results_summary
@@ -313,20 +310,16 @@ class SwarmOrchestrator(BaseOrchestrator):
             "current_step": state.current_step + 1,
         }
 
-    def execute_swarm_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def execute_swarm_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Execute all swarm agents in parallel."""
-        import asyncio
+        tasks = []
+        for agent_name in state.pending_agents:
+            tasks.append(self.handoff_to_agent(state, agent_name, state.goal))
 
-        async def run_swarm():
-            tasks = []
-            for agent_name in state.pending_agents:
-                tasks.append(self.handoff_to_agent(state, agent_name, state.goal))
-            await asyncio.gather(*tasks)
-
-        asyncio.run(run_swarm())
+        await asyncio.gather(*tasks)
         return {"current_step": state.current_step + 1}
 
-    def aggregate_swarm_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def aggregate_swarm_node(self, state: OrchestrationState) -> Dict[str, Any]:
         # Aggregate swarm results based on strategy.
         results = list(state.sub_results.values())
 
@@ -347,7 +340,6 @@ class SwarmOrchestrator(BaseOrchestrator):
             if not self.llm:
                 return {"result": results[0] if results else {}, "current_step": state.current_step + 1}
 
-            import asyncio
             consensus_prompt = f"""Task: {state.goal}
 
 Multiple agents provided these results:
@@ -361,7 +353,7 @@ Find consensus or synthesize the best answer. If agents disagree, explain the di
             ]
 
             try:
-                response = asyncio.run(self.llm.chat(messages))
+                response = await self.llm.chat(messages)
                 consensus = response.content
             except Exception:
                 consensus = "Could not reach consensus"
@@ -417,7 +409,7 @@ class PipelineOrchestrator(BaseOrchestrator):
 
     def _create_stage_node(self, index: int, stage: Dict[str, Any]) -> Callable:
         """Create a node function for a pipeline stage."""
-        def stage_node(state: OrchestrationState) -> Dict[str, Any]:
+        async def stage_node(state: OrchestrationState) -> Dict[str, Any]:
             capability = stage["capability"]
             task_template = stage["task_template"]
 
@@ -440,8 +432,7 @@ class PipelineOrchestrator(BaseOrchestrator):
             agent_name = agents[0].metadata.name
 
             # Execute stage
-            import asyncio
-            asyncio.run(self.handoff_to_agent(state, agent_name, task))
+            await self.handoff_to_agent(state, agent_name, task)
 
             return {"current_step": state.current_step + 1}
 
@@ -487,21 +478,20 @@ class DebateOrchestrator(BaseOrchestrator):
 
         return graph
 
-    def opening_statements_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def opening_statements_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Get opening statements from all debaters."""
         agents = self.registry.discover_by_capability(AgentCapability.REASONING, max_results=self.debaters)
         debater_names = [a.metadata.name for a in agents]
 
-        import asyncio
-        async def get_openings():
-            for name in debater_names:
-                await self.handoff_to_agent(state, name, f"Opening statement on: {state.goal}")
+        tasks = []
+        for name in debater_names:
+            tasks.append(self.handoff_to_agent(state, name, f"Opening statement on: {state.goal}"))
 
-        asyncio.run(get_openings())
+        await asyncio.gather(*tasks)
         return {"pending_agents": debater_names, "current_step": state.current_step + 1}
 
     def _create_rebuttal_node(self, round_num: int) -> Callable:
-        def rebuttal_node(state: OrchestrationState) -> Dict[str, Any]:
+        async def rebuttal_node(state: OrchestrationState) -> Dict[str, Any]:
             debater_names = state.pending_agents
 
             # Build context from previous rounds
@@ -509,18 +499,17 @@ class DebateOrchestrator(BaseOrchestrator):
             for agent, result in state.sub_results.items():
                 context += f"{agent}: {result.get('result', {})}\n\n"
 
-            import asyncio
-            async def get_rebuttals():
-                for name in debater_names:
-                    task = f"Rebuttal round {round_num + 1}. Previous: {context}\nYour turn."
-                    await self.handoff_to_agent(state, name, task)
+            tasks = []
+            for name in debater_names:
+                task = f"Rebuttal round {round_num + 1}. Previous: {context}\nYour turn."
+                tasks.append(self.handoff_to_agent(state, name, task))
 
-            asyncio.run(get_rebuttals())
+            await asyncio.gather(*tasks)
             return {"current_step": state.current_step + 1}
 
         return rebuttal_node
 
-    def judgment_node(self, state: OrchestrationState) -> Dict[str, Any]:
+    async def judgment_node(self, state: OrchestrationState) -> Dict[str, Any]:
         """Judge evaluates debate and provides final verdict."""
         if not self.llm:
             return {"result": state.sub_results, "current_step": state.current_step + 1}
@@ -530,7 +519,6 @@ class DebateOrchestrator(BaseOrchestrator):
             for agent, result in state.sub_results.items()
         ])
 
-        import asyncio
         judgment_prompt = f"""Topic: {state.goal}
 
 Debate transcript:
@@ -544,7 +532,7 @@ You are the judge. Provide a final verdict that synthesizes the best arguments f
         ]
 
         try:
-            response = asyncio.run(self.llm.chat(messages))
+            response = await self.llm.chat(messages)
             verdict = response.content
         except Exception:
             verdict = "Could not render judgment"
