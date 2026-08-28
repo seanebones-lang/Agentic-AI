@@ -1,84 +1,93 @@
+import React from 'react'
 import { RefreshCw, Search, Bell, Settings, ChevronDown, CheckCircle, LogOut } from 'lucide-react'
 
 interface HeaderProps {
   onRefresh: () => void
-  onSearchChange: (query: string) => void
-  searchQuery: string
-  loading: boolean
+  onSearchChange: (value: string) => void
+  searchValue: string
+  onSettingsClick: () => void
+  onProfileClick: () => void
+  onLogoutClick: () => void
+  pendingCount: number
 }
 
-export function Header({ onRefresh, onSearchChange, searchQuery, loading }: HeaderProps) {
+export function Header({
+  onRefresh,
+  onSearchChange,
+  searchValue,
+  onSettingsClick,
+  onProfileClick,
+  onLogoutClick,
+  pendingCount,
+}: HeaderProps) {
   return (
-    <header className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)] sticky top-0 z-50">
-      <div className="container">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent-primary)' }}>
-                <CheckCircle className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-bold text-xl">HITL Dashboard</span>
-            </div>
+    <header className="bg-secondary border-b border-primary sticky top-0 z-40">
+      <div className="flex items-center justify-between h-16 px-4 sm:px-6">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold text-fg-primary">HITL Dashboard</h1>
+          <div className="hidden sm:block relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+            <input
+              type="search"
+              value={searchValue}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search checkpoints..."
+              className="input pl-10 w-full"
+              aria-label="Search checkpoints"
+            />
           </div>
+        </div>
 
-          <div className="flex items-center gap-4">
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--fg-muted)]" />
-              <input
-                type="text"
-                placeholder="Search checkpoints..."
-                className="input pl-10 pr-4 w-64"
-                value={searchQuery}
-                onChange={(e) => onSearchChange(e.target.value)}
-              />
-            </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRefresh}
+            className="btn btn-ghost btn-icon relative"
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <RefreshCw className="w-5 h-5" />
+            {pendingCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
+          </button>
 
+          <button
+            onClick={onSettingsClick}
+            className="btn btn-ghost btn-icon"
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+
+          <div className="dropdown">
             <button
-              className="btn btn-ghost btn-sm"
-              onClick={onRefresh}
-              disabled={loading}
-              title="Refresh"
+              onClick={onProfileClick}
+              className="btn btn-ghost flex items-center gap-2"
+              aria-label="User menu"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-blue-500" />
+              </div>
+              <span className="hidden sm:block text-sm font-medium">Operator</span>
+              <ChevronDown className="w-4 h-4 text-muted" />
             </button>
-
-            <div className="dropdown">
-              <button className="btn btn-ghost btn-sm" aria-label="Notifications">
-                <Bell className="w-4 h-4" />
-              </button>
-              <div className="dropdown-menu">
-                <div className="px-3 py-2 border-b border-[var(--border-color)] text-sm font-medium">
-                  Notifications
-                </div>
-                <div className="py-2 text-center text-[var(--fg-muted)] text-sm">
-                  No notifications
-                </div>
+            <div className="dropdown-menu">
+              <div className="px-3 py-2 border-b border-primary">
+                <p className="text-sm font-medium">Operator</p>
+                <p className="text-xs text-muted">operator@company.com</p>
               </div>
-            </div>
-
-            <div className="dropdown">
-              <button className="btn btn-ghost btn-sm flex items-center gap-2" aria-label="User menu">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--accent-primary)' }}>
-                  <span className="text-white text-sm font-medium">U</span>
-                </div>
-                <span className="hidden sm:block text-sm">User</span>
-                <ChevronDown className="w-4 h-4" />
+              <button className="dropdown-item w-full" onClick={onSettingsClick}>
+                <Settings className="w-4 h-4" />
+                Settings
               </button>
-              <div className="dropdown-menu">
-                <div className="px-3 py-2 border-b border-[var(--border-color)]">
-                  <p className="font-medium text-sm">Current User</p>
-                  <p className="text-xs text-[var(--fg-muted)]">user@agentic-ai.com</p>
-                </div>
-                <button className="dropdown-item w-full justify-start">
-                  <Settings className="w-4 h-4" />
-                  Settings
-                </button>
-                <div className="dropdown-divider" />
-                <button className="dropdown-item w-full justify-start text-[var(--accent-danger)]">
-                  <LogOut className="w-4 h-4" />
-                  Sign Out
-                </button>
-              </div>
+              <div className="dropdown-divider" />
+              <button className="dropdown-item w-full danger" onClick={onLogoutClick}>
+                <LogOut className="w-4 h-4" />
+                Logout
+              </button>
             </div>
           </div>
         </div>
