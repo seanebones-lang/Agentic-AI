@@ -47,6 +47,38 @@ app = FastAPI(
     description="""
 Production-ready API for autonomous AI agents with Human-in-the-Loop (HITL) oversight.
 
+# GraphQL Support (optional - requires strawberry-graphql)
+try:
+    import strawberry
+    from strawberry.fastapi import GraphQLRouter
+    
+    @strawberry.type
+    class HealthStatus:
+        status: str
+        version: str
+        timestamp: str
+        services: dict
+    
+    @strawberry.type
+    class Query:
+        @strawberry.field
+        def health(self) -> HealthStatus:
+            return HealthStatus(
+                status="healthy",
+                version="0.1.0",
+                timestamp=datetime.utcnow().isoformat(),
+                services={"api": "operational", "hitl": "operational"}
+            )
+    
+    schema = strawberry.Schema(query=Query)
+    graphql_app = GraphQLRouter(schema)
+    app.include_router(graphql_app, prefix="/graphql")
+    print("GraphQL endpoint enabled at /graphql")
+except ImportError:
+    print("strawberry-graphql not installed, GraphQL endpoint disabled")
+    graphql_app = None
+
+
 ## Features
 
 - **Autonomous Agents**: LangGraph-based state management with multiple reasoning patterns

@@ -25,9 +25,26 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     azure_openai_api_key: Optional[str] = None
     azure_openai_endpoint: Optional[str] = None
+    nvidia_api_key: Optional[str] = None
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    google_api_key: Optional[str] = None
+    google_vertex_ai_project: Optional[str] = None
+    google_vertex_ai_location: str = "us-central1"
+    cohere_api_key: Optional[str] = None
+    mistral_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    perplexity_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    openrouter_api_key: Optional[str] = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Default LLM Configuration
-    default_llm_provider: Literal["openai", "anthropic", "azure_openai"] = "openai"
+    default_llm_provider: Literal[
+        "openai", "anthropic", "azure_openai", "nvidia", "google", "vertex_ai",
+        "cohere", "mistral", "groq", "together", "perplexity", "deepseek", "openrouter"
+    ] = "openai"
     default_model: str = "gpt-4o"
     default_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     default_max_tokens: int = Field(default=4096, ge=1, le=128000)
