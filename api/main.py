@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -31,6 +31,9 @@ from observability.tracing import setup_tracing
 from tools.tool_manager import ToolManager
 from tools.examples import APICallerTool, DatabaseQueryTool, FileOperationsTool, NotifierTool, CodeExecutionTool, WebSearchTool, VectorSearchTool, BrowserTool, ShellTool
 
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import Response
+
 # Initialize logging and tracing
 setup_logging()
 setup_tracing()
@@ -47,6 +50,16 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+# Prometheus metrics
+REQUEST_COUNT = Counter(
+    "http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"]
+)
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds", "HTTP request latency", ["method", "endpoint"]
+)
+ACTIVE_EXECUTIONS = Gauge("active_executions", "Number of active agent executions")
+
 # Add CORS middleware
 if settings.enable_cors:
     app.add_middleware(
@@ -61,6 +74,27 @@ if settings.enable_cors:
 app.add_middleware(LoggingMiddleware)
 if settings.rate_limit_enabled:
     app.add_middleware(RateLimitMiddleware)
+# Add metrics middleware
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    import time
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    
+    REQUEST_COUNT.labels(
+        method=request.method,
+        endpoint=request.url.path,
+        status=response.status_code
+    ).inc()
+    REQUEST_LATENCY.labels(
+        method=request.method,
+        endpoint=request.url.path
+    ).observe(duration)
+    
+    return response
+
+
 
 # Global state
 executions: Dict[str, Dict] = {}
@@ -190,7 +224,35 @@ async def root() -> HealthCheckResponse:
 
 @app.get("/health", response_model=HealthCheckResponse)
 async def health_check() -> HealthCheckResponse:
-    """Health check endpoint."""
+    """Health check endpoint with detailed service status."""
+    import redis
+    from chromadb import HttpClient as ChromaClient
+    
+    # Check Redis connection
+    redis_status = "operational"
+    try:
+        r = redis.from_url(settings.redis_url, socket_connect_timeout=2)
+        r.ping()
+    except Exception:
+        redis_status = "degraded"
+    
+    # Check ChromaDB connection
+    chroma_status = "operational"
+    try:
+        client = ChromaClient(host=settings.chroma_host, port=settings.chroma_port)
+        client.heartbeat()
+    except Exception:
+        chroma_status = "degraded"
+    
+    # Check HITL checkpoint manager
+    hitl_status = "operational"
+    try:
+        checkpoint_manager = get_checkpoint_manager()
+        pending = len(checkpoint_manager.list_pending_checkpoints())
+    except Exception:
+        hitl_status = "degraded"
+        pending = 0
+    
     services = {
         "api": "operational",
         "redis": "unknown",  # Would check Redis connection in production
@@ -204,6 +266,17 @@ async def health_check() -> HealthCheckResponse:
         services=services,
     )
 
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi_spec() -> Dict[str, Any]:
+    """OpenAPI 3.1 specification."""
+    return app.openapi()
 
 @app.get("/health/ready")
 async def readiness_check() -> dict:
