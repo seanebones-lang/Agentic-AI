@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -676,6 +676,56 @@ async def list_api_keys(
         "api_keys": [],
         "message": "API key listing not yet implemented - connect to database",
     }
+
+
+# WebSocket for real-time agent execution monitoring
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, List
+import asyncio
+import json
+
+class ConnectionManager:
+    """Manage WebSocket connections for real-time updates."""
+    
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+    
+    async def connect(self, websocket: WebSocket, execution_id: str):
+        await websocket.accept()
+        if execution_id not in self.active_connections:
+            self.active_connections[execution_id] = []
+        self.active_connections[execution_id].append(websocket)
+        logger.info("WebSocket connected", execution_id=execution_id, total=len(self.active_connections[execution_id]))
+    
+    def disconnect(self, websocket: WebSocket, execution_id: str):
+        if execution_id in self.active_connections:
+            self.active_connections[execution_id].remove(websocket)
+            if not self.active_connections[execution_id]:
+                del self.active_connections[execution_id]
+        logger.info("WebSocket disconnected", execution_id=execution_id)
+    
+    async def broadcast(self, execution_id: str, message: dict):
+        if execution_id in self.active_connections:
+            for connection in self.active_connections[execution_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass  # Connection closed, will be cleaned up on next disconnect
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/agents/{execution_id}")
+async def websocket_agent_status(websocket: WebSocket, execution_id: str):
+    """WebSocket endpoint for real-time agent execution status updates."""
+    await manager.connect(websocket, execution_id)
+    try:
+        while True:
+            # Keep connection alive, wait for client messages (ping/pong)
+            data = await websocket.receive_text()
+            # Echo back or handle client messages
+            await websocket.send_json({"type": "pong", "data": data})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, execution_id)
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: any, exc: HTTPException) -> JSONResponse:
