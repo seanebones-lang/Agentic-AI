@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 import subprocess
 import shlex
 import os
+import shutil
+from pathlib import Path
 
 from tools.tool_manager import BaseTool
 
@@ -102,17 +104,32 @@ class ShellTool(BaseTool):
             parts = shlex.split(command)
             if not parts:
                 return False, "Empty command"
-            base_cmd = os.path.basename(parts[0])
+            
+            # Resolve the full path of the command
+            base_cmd = parts[0]
+            resolved_path = shutil.which(base_cmd)
+            if not resolved_path:
+                return False, f"Command not found: {base_cmd}"
+            
+            # Get the actual command name from resolved path
+            actual_cmd = os.path.basename(resolved_path)
+            
+            # Additional check: if the command is a shell interpreter, check for -c flag
+            if actual_cmd in ("bash", "sh", "zsh", "fish", "csh", "tcsh"):
+                # Check if -c flag is used (which allows arbitrary command execution)
+                if "-c" in parts:
+                    return False, f"Shell -c flag not allowed for security"
+                    
         except ValueError:
             return False, "Invalid command syntax"
 
         # Check blocklist
-        if base_cmd in self.blocked_commands:
-            return False, f"Command blocked: {base_cmd}"
+        if actual_cmd in self.blocked_commands:
+            return False, f"Command blocked: {actual_cmd}"
 
         # Check allowlist
-        if self.allowed_commands is not None and base_cmd not in self.allowed_commands:
-            return False, f"Command not in allowlist: {base_cmd}"
+        if self.allowed_commands is not None and actual_cmd not in self.allowed_commands:
+            return False, f"Command not in allowlist: {actual_cmd}"
 
         return True, None
 

@@ -5,6 +5,7 @@ import tempfile
 import os
 import subprocess
 import json
+import sys
 
 from tools.tool_manager import BaseTool
 
@@ -17,6 +18,8 @@ class CodeExecutionTool(BaseTool):
         allowed_imports: Optional[list] = None,
         blocked_imports: Optional[list] = None,
         max_execution_time: int = 30,
+        use_nsjail: bool = True,
+        nsjail_path: str = "nsjail",
     ) -> None:
         """
         Initialize code execution tool.
@@ -25,6 +28,8 @@ class CodeExecutionTool(BaseTool):
             allowed_imports: List of allowed import modules (None = allow all safe)
             blocked_imports: List of blocked import modules
             max_execution_time: Maximum execution time in seconds
+            use_nsjail: Use nsjail for true sandboxing (requires nsjail installed)
+            nsjail_path: Path to nsjail binary
         """
         super().__init__(
             name="code_execution",
@@ -71,6 +76,16 @@ class CodeExecutionTool(BaseTool):
             "ctypes", "cffi", "sysconfig",
         ]
         self.max_execution_time = max_execution_time
+        self.use_nsjail = use_nsjail
+        self.nsjail_path = nsjail_path
+        
+        # Check if nsjail is available
+        self._nsjail_available = self._check_nsjail()
+
+    def _check_nsjail(self) -> bool:
+        """Check if nsjail binary is available."""
+        import shutil
+        return shutil.which(self.nsjail_path) is not None
 
     def _check_imports(self, code: str) -> tuple[bool, Optional[str]]:
         """Check if code contains blocked imports."""
@@ -118,6 +133,111 @@ class CodeExecutionTool(BaseTool):
                 "success": False,
                 "execution_time": 0,
             }
+
+        # If nsjail is available and enabled, use it for true sandboxing
+        if self.use_nsjail and self._nsjail_available:
+            return self._execute_with_nsjail(code, timeout, variables)
+
+        # Fallback: restricted exec environment
+        return self._execute_restricted(code, timeout, variables)
+
+    def _execute_with_nsjail(self, code: str, timeout: int, variables: Optional[Dict]) -> Dict[str, Any]:
+        """Execute code using nsjail for true sandboxing."""
+        import tempfile
+        import os
+
+        start_time = time.time()
+
+        # Write code to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # Add variable injection if provided
+            if variables:
+                for key, value in variables.items():
+                    f.write(f"{key} = {json.dumps(value)}\n")
+            f.write(code)
+            f.write("\n\nimport json\n_result = locals().get('_result')\nif '_result' in locals():\n    print('__RESULT__', json.dumps(_result, default=str))\n")
+            temp_file = f.name
+
+        try:
+            # nsjail command: isolate filesystem, network, limit CPU/memory
+            nsjail_cmd = [
+                self.nsjail_path,
+                "--mode", "once",
+                "--time_limit", str(timeout),
+                "--max_cpus", "1",
+                "--rlimit_as", "100",  # 100MB memory limit
+                "--rlimit_cpu", str(timeout),
+                "--rlimit_fsize", "10",  # 10MB file size limit
+                "--rlimit_nofile", "16",
+                "--disable_clone_newnet",  # Disable network
+                "--disable_clone_newuser",
+                "--disable_clone_newipc",
+                "--disable_clone_newuts",
+                "--disable_clone_newcgroup",
+                "--disable_clone_newpid",
+                "--",  # End of nsjail options
+                sys.executable, temp_file,
+            ]
+
+            result = subprocess.run(
+                nsjail_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout + 5,  # Extra buffer for nsjail overhead
+            )
+
+            execution_time = time.time() - start_time
+
+            # Extract return value from stdout if present
+            return_value = None
+            stdout = result.stdout
+            if "__RESULT__" in stdout:
+                try:
+                    parts = stdout.split("__RESULT__", 1)
+                    stdout = parts[0]
+                    return_value = json.loads(parts[1].strip())
+                except:
+                    pass
+
+            return {
+                "stdout": stdout,
+                "stderr": result.stderr,
+                "return_value": return_value,
+                "success": result.returncode == 0,
+                "execution_time": execution_time,
+            }
+
+        except subprocess.TimeoutExpired:
+            execution_time = time.time() - start_time
+            return {
+                "stdout": "",
+                "stderr": f"Command timed out after {timeout} seconds",
+                "return_value": None,
+                "success": False,
+                "execution_time": execution_time,
+            }
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return {
+                "stdout": "",
+                "stderr": f"Execution error: {str(e)}",
+                "return_value": None,
+                "success": False,
+                "execution_time": execution_time,
+            }
+        finally:
+            # Cleanup temp file
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+
+    def _execute_restricted(self, code: str, timeout: int, variables: Optional[Dict]) -> Dict[str, Any]:
+        """Fallback restricted execution without nsjail."""
+        import time
+        import io
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
 
         # Prepare execution environment
         exec_globals = {
@@ -176,10 +296,6 @@ class CodeExecutionTool(BaseTool):
             exec_globals.update(variables)
 
         # Capture stdout/stderr
-        import io
-        import sys
-        from contextlib import redirect_stdout, redirect_stderr
-
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
 
