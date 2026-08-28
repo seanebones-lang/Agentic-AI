@@ -7,12 +7,63 @@ from typing import Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from fastapi import Response
 
 from config import get_settings
 from observability.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+# Prometheus metrics
+agent_executions_total = Counter(
+    'agentic_ai_agent_executions_total',
+    'Total agent executions',
+    ['agent_type', 'status']
+)
+
+agent_execution_duration = Histogram(
+    'agentic_ai_agent_execution_duration_seconds',
+    'Agent execution duration in seconds',
+    ['agent_type']
+)
+
+tool_usage_total = Counter(
+    'agentic_ai_tool_usage_total',
+    'Total tool usage',
+    ['tool_name', 'status']
+)
+
+tool_execution_duration = Histogram(
+    'agentic_ai_tool_execution_duration_seconds',
+    'Tool execution duration in seconds',
+    ['tool_name']
+)
+
+hitl_interventions_total = Counter(
+    'agentic_ai_hitl_interventions_total',
+    'Total HITL interventions',
+    ['reason', 'status']
+)
+
+hitl_checkpoint_duration = Histogram(
+    'agentic_ai_hitl_checkpoint_duration_seconds',
+    'HITL checkpoint resolution duration in seconds',
+    ['reason']
+)
+
+active_checkpoints = Gauge(
+    'agentic_ai_active_checkpoints',
+    'Number of active checkpoints',
+    ['status']
+)
+
+errors_total = Counter(
+    'agentic_ai_errors_total',
+    'Total errors',
+    ['error_type', 'component']
+)
 
 @dataclass
 class Metric:
@@ -165,6 +216,11 @@ class MetricsCollector:
         for metric in self.metrics:
             summary[metric.name] = summary.get(metric.name, 0) + 1
         return summary
+
+    def export_prometheus(self) -> Response:
+        """Export metrics in Prometheus format."""
+        # Update active checkpoints gauge from current state
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 class MetricsContext:

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.base_agent import SimpleAgent
-from api.middleware import LoggingMiddleware, RateLimitMiddleware, get_api_key
+from api.middleware import LoggingMiddleware, RateLimitMiddleware, get_api_key, require_permission, Permission
 from api.models import (
     AgentExecuteRequest,
     AgentExecuteResponse,
@@ -203,6 +203,59 @@ async def health_check() -> HealthCheckResponse:
         timestamp=datetime.utcnow(),
         services=services,
     )
+
+
+@app.get("/health/ready")
+async def readiness_check() -> dict:
+    """Readiness check with dependency verification."""
+    checks = {
+        "api": "healthy",
+        "redis": "unknown",
+        "postgres": "unknown",
+        "vector_db": "unknown",
+    }
+    
+    overall_status = "healthy"
+    
+    # Check Redis
+    try:
+        import redis.asyncio as redis
+        redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+        await redis_client.ping()
+        await redis_client.close()
+        checks["redis"] = "healthy"
+    except Exception:
+        checks["redis"] = "unhealthy"
+        overall_status = "degraded"
+    
+    # Check PostgreSQL
+    try:
+        from asyncpg import create_pool
+        pool = await create_pool(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            user=settings.postgres_user,
+            password=settings.postgres_password,
+            database=settings.postgres_db,
+        )
+        await pool.close()
+        checks["postgres"] = "healthy"
+    except Exception:
+        checks["postgres"] = "unhealthy"
+        overall_status = "degraded"
+    
+    return {
+        "status": overall_status,
+        "checks": checks,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus metrics endpoint."""
+    metrics = get_metrics_collector()
+    return metrics.export_prometheus()
 
 
 @app.post("/agents/execute", response_model=AgentExecuteResponse)

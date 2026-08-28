@@ -92,3 +92,4 @@ site/
 # Plan files
 *.plan.md
 
+hitl/dashboard/node_modules/

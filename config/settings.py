@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: Optional[str] = None
 
+    # PostgreSQL Configuration
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "agentic_ai"
+
     # AWS Configuration
     aws_region: str = "us-east-1"
     aws_access_key_id: Optional[str] = None
@@ -70,6 +77,7 @@ class Settings(BaseSettings):
     hitl_timeout_seconds: int = 3600
     hitl_notification_email: Optional[str] = None
     hitl_slack_webhook_url: Optional[str] = None
+    hitl_webhook_secret: str = "change-me-in-production"
 
     # Observability
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

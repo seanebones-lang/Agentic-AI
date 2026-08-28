@@ -1,9 +1,12 @@
 """Middleware for authentication, rate limiting, and request logging."""
 
 import time
-from typing import Callable, Optional
+import jwt
+from datetime import datetime, timedelta
+from typing import Callable, Optional, Dict, List
+from enum import Enum
 
-from fastapi import Header, HTTPException, Request, Response, status
+from fastapi import Header, HTTPException, Request, Response, status, Depends
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import get_settings
@@ -11,6 +14,115 @@ from observability.logger import get_logger, set_correlation_id
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    OPERATOR = "operator"
+    VIEWER = "viewer"
+
+
+class Permission(str, Enum):
+    # Agent permissions
+    AGENT_EXECUTE = "agent:execute"
+    AGENT_READ = "agent:read"
+    AGENT_HISTORY = "agent:history"
+    
+    # HITL permissions
+    HITL_READ = "hitl:read"
+    HITL_APPROVE = "hitl:approve"
+    HITL_REJECT = "hitl:reject"
+    HITL_ESCALATE = "hitl:escalate"
+    HITL_CONFIG = "hitl:config"
+    
+    # Admin permissions
+    ADMIN_USERS = "admin:users"
+    ADMIN_CONFIG = "admin:config"
+    ADMIN_METRICS = "admin:metrics"
+
+
+ROLE_PERMISSIONS: Dict[UserRole, List[Permission]] = {
+    UserRole.ADMIN: [
+        Permission.AGENT_EXECUTE, Permission.AGENT_READ, Permission.AGENT_HISTORY,
+        Permission.HITL_READ, Permission.HITL_APPROVE, Permission.HITL_REJECT, Permission.HITL_ESCALATE, Permission.HITL_CONFIG,
+        Permission.ADMIN_USERS, Permission.ADMIN_CONFIG, Permission.ADMIN_METRICS,
+    ],
+    UserRole.OPERATOR: [
+        Permission.AGENT_EXECUTE, Permission.AGENT_READ, Permission.AGENT_HISTORY,
+        Permission.HITL_READ, Permission.HITL_APPROVE, Permission.HITL_REJECT, Permission.HITL_ESCALATE,
+    ],
+    UserRole.VIEWER: [
+        Permission.AGENT_READ, Permission.AGENT_HISTORY,
+        Permission.HITL_READ,
+    ],
+}
+
+# JWT token payload
+class TokenPayload:
+    def __init__(self, sub: str, roles: List[str], exp: int):
+        self.sub = sub
+        self.roles = [UserRole(r) for r in roles]
+        self.exp = exp
+
+    def has_permission(self, permission: Permission) -> bool:
+        for role in self.roles:
+            if permission in ROLE_PERMISSIONS.get(role, []):
+                return True
+        return False
+
+
+def create_access_token(subject: str, roles: List[UserRole], expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token."""
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expiration_minutes)
+    
+    to_encode = {
+        "sub": subject,
+        "roles": [r.value for r in roles],
+        "exp": expire,
+    }
+    
+    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_token(token: str) -> TokenPayload:
+    """Decode and validate JWT token."""
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        return TokenPayload(
+            sub=payload.get("sub", ""),
+            roles=payload.get("roles", []),
+            exp=payload.get("exp", 0),
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def get_current_user(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> TokenPayload:
+    """Get current user from JWT token."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    token = authorization[7:]  # Remove "Bearer "
+    return decode_token(token)
+
+
+def require_permission(permission: Permission):
+    """Dependency factory for permission checking."""
+    async def check_permission(current_user: TokenPayload = Depends(get_current_user)):
+        if not current_user.has_permission(permission):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. Required: {permission.value}"
+            )
+        return current_user
+    return check_permission
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
