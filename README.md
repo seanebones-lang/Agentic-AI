@@ -4,6 +4,156 @@
 
 Production-ready starter template for building autonomous AI agents with reasoning chains, human-in-the-loop oversight, and cloud deployment.
 
+
+
+## New Features (v0.2.0)
+
+### Multi-Provider AI Support
+- **OpenAI** (GPT-4, GPT-4o, o1)
+- **Anthropic** (Claude 3.5 Sonnet, Opus, Haiku)
+- **Azure OpenAI**
+- **NVIDIA** (Nemotron, Llama, custom models)
+- **Google Vertex AI** (Gemini, PaLM)
+- **Cohere** (Command R+, Embed)
+- **Mistral** (Mistral Large, Embed)
+- **Groq** (Llama 3, Mixtral - ultra-fast inference)
+- **Together AI** (Llama, Qwen, CodeLlama)
+- **Perplexity** (Sonar, Llama 3.1)
+- **DeepSeek** (DeepSeek Coder, Chat)
+- **OpenRouter** (Unified access to 100+ models)
+
+### Monitoring & Observability
+- **Prometheus Metrics** (`/metrics`) - Request counts, latency histograms, active executions
+- **Enhanced Health Check** (`/health`) - Redis, ChromaDB, HITL checkpoint status
+- **OpenAPI 3.1 Spec** (`/openapi.json`) - Complete API specification
+- **Correlation IDs** - Request tracing across services
+- **Structured Logging** - JSON logs with correlation IDs
+
+### Real-time Communication
+- **WebSocket Endpoint** (`/ws/agents/{execution_id}`) - Real-time agent status updates
+- **GraphQL Endpoint** (`/graphql`) - Flexible query API (requires strawberry-graphql)
+
+### Security & Access Control
+- **JWT-based Authentication** with role-based permissions (Admin, Operator, Viewer)
+- **API Key Management** (`/admin/api-keys`) - Create and list API keys
+- **Rate Limiting** - Per-key rate limiting with headers
+- **Input Sanitization** - OWASP-compliant input validation
+- **PII Detection** - Email, phone, SSN detection and redaction
+
+### Deployment & DevOps
+- **Dockerfile** - Multi-stage build for production
+- **Docker Compose** - Local development with Redis + ChromaDB
+- **GitHub Actions CI/CD** - Test, lint, type-check, security scan, Docker build
+- **AWS CloudFormation** - ECS Fargate deployment with DynamoDB, S3, CloudWatch
+- **Health Checks** - Container and service-level health checks
+
+### Core Improvements
+- **Fixed LangGraph node name conflicts** - AgentState field vs node name resolution
+- **Upgraded Dependencies** - langgraph 0.2.76, langchain 0.3.25, fastapi 0.115.14, pydantic 2.10.6
+- **SHA256 Crypt** - Replaced bcrypt for password hashing (no 72-byte limit)
+- **All 27 Tests Pass** - Comprehensive test coverage
+
+## Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/seanebones-lang/Agentic-AI.git
+cd Agentic-AI
+pip install -e ".[dev]"
+
+# Run with Docker Compose (includes Redis + ChromaDB)
+docker-compose -f deployment/docker-compose.yml up -d
+
+# Run API locally
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Run tests
+pytest tests/ -v
+
+# View API docs
+open http://localhost:8000/docs
+open http://localhost:8000/redoc
+open http://localhost:8000/graphql
+```
+
+## API Endpoints
+
+| Endpoint | Method | Tags | Description |
+|----------|--------|------|-------------|
+| `/` | GET | health | Root health check |
+| `/health` | GET | health | Detailed service health |
+| `/metrics` | GET | metrics | Prometheus metrics |
+| `/openapi.json` | GET | - | OpenAPI 3.1 spec |
+| `/graphql` | POST | - | GraphQL endpoint |
+| `/ws/agents/{id}` | WS | - | Real-time agent status |
+| `/agents/execute` | POST | agents | Execute agent |
+| `/agents/{id}/status` | GET | agents | Get execution status |
+| `/agents/{id}/history` | GET | agents | Get execution history |
+| `/agents/{id}/approve` | POST | hitl | Approve HITL checkpoint |
+| `/hitl/checkpoints` | GET | hitl | List pending checkpoints |
+| `/admin/api-keys` | POST/GET | admin | Manage API keys |
+
+## Configuration
+
+All configuration via environment variables or `.env` file:
+
+```bash
+# LLM Providers
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-...
+NVIDIA_API_KEY=...
+GOOGLE_VERTEX_AI_PROJECT=...
+COHERE_API_KEY=...
+MISTRAL_API_KEY=...
+GROQ_API_KEY=...
+TOGETHER_API_KEY=...
+PERPLEXITY_API_KEY=...
+DEEPSEEK_API_KEY=...
+OPENROUTER_API_KEY=...
+
+# Default Provider
+DEFAULT_LLM_PROVIDER=openai  # or nvidia, google, vertex_ai, etc.
+DEFAULT_MODEL=gpt-4o
+
+# Infrastructure
+REDIS_HOST=localhost
+REDIS_PORT=6379
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
+
+# Security
+JWT_SECRET_KEY=your-secret-key
+API_KEY_HEADER=X-API-Key
+RATE_LIMIT_PER_MINUTE=60
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        FastAPI API                           │
+│  (Authentication, Rate Limiting, Request Logging, Metrics)  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+        ┌─────────────────┼─────────────────┐
+        ▼                 ▼                 ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│   Agents      │ │    Tools      │ │    Memory     │
+│ (LangGraph)   │ │ (Semantic)    │ │ (Redis/Chroma)│
+└───────────────┘ └───────────────┘ └───────────────┘
+        │                 │                 │
+        ▼                 ▼                 ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│    HITL       │ │  Observability│ │   Security    │
+│ (Checkpoints) │ │ (Prometheus,  │ │ (PII, Sanit.) │
+└───────────────┘ └───────────────┘ └───────────────┘
+```
+
+## License
+
+**PROPRIETARY SOFTWARE - ALL RIGHTS RESERVED**
+
+See [LICENSE](LICENSE) for complete terms.
 ## License Notice
 
 This software is proprietary and confidential. No evaluation, testing, or use of any kind is permitted without an express written license from Sean McDonnell. See LICENSE file for complete terms.
